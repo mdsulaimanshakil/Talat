@@ -22,7 +22,8 @@ pip install -r requirements.txt
 pytest                                          # run the tests
 python -m talat.cli                             # text-mode game
 python -m talat.tournament --agents greedy,paranoid,mcts   # AI tournament, CSVs in results/
-flet run                                        # the app, in a desktop window
+flet run                                        # 2D Flet app (desktop window)
+python -m talat.app3d                           # 3D Ursina app (desktop, requires ursina)
 ```
 
 ## On your phone
