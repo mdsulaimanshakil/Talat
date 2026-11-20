@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Flet / build output
+build/
+dist/
+storage/
+
+# Tournament results
+results/
+
+# macOS – not needed on Windows, safe to ignore
+.DS_Store
+**/.DS_Store
+__MACOSX/
+._*

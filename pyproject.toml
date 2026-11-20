@@ -1,0 +1,29 @@
+[project]
+name = "talat"
+version = "1.0.0"
+description = "TALAT: a three-player, three-board AI strategy game (CSE 3210 AI Lab, KUET)"
+requires-python = ">=3.11"
+dependencies = ["flet==1.0.5"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+# ---------- flet build (Android APK) ----------
+[tool.flet]
+product = "Talat"                 # app name on the phone
+org = "bd.ac.kuet.cse"            # package id becomes bd.ac.kuet.cse.talat
+company = "KUET CSE 3210 AI Lab"
+copyright = "Copyright (C) 2026 TALAT team"
+
+[tool.flet.app]
+path = "."
+# Keep the APK small: only main.py, talat/ and assets/ are needed on the phone.
+exclude = [
+    "tests", "results", "BUILD_PLAN.md", "README.md", "requirements.txt",
+    "talat-rules-4.pdf", "images.jpeg", "TALAT_Presentation_11_16_22.pptx",
+    "TALAT_Presentation_11_16_22 copy.pptx",
+]
+
+[tool.flet.android]
+adaptive_icon_background = "#0A0A0A"
