@@ -5,6 +5,7 @@ import pytest
 from talat.engine import BOARD_PLAYERS, PLAYERS, boards_of
 from talat.scene import (
     BOARD_TURN, PLAYER_SPOT, SIDE_GAP, SIDE_MIN, TABLE_ABOVE, TABLE_BELOW, TABLE_W, TOKEN, board_centre,
+    facing_turn, name_below, nearest_turn, rotate_point,
     board_corners, camera, focus_camera, name_box, pair_camera, regions, table_camera,
 )
 
@@ -31,9 +32,11 @@ def on_screen(cam, points, size):
 
 # ---------- the table itself (never changes) ----------
 
-def test_boards_do_not_overlap_and_fit_the_table():
+def test_boards_meet_corner_to_corner_without_overlapping_and_fit_the_table():
     for a, b in [("A", "B"), ("B", "C"), ("A", "C")]:
-        assert gap(board_corners(a), board_corners(b)) > 0.05
+        assert gap(board_corners(a), board_corners(b)) == pytest.approx(0, abs=1e-9)   # touching, not overlapping
+        shared = [p for p in board_corners(a) for q in board_corners(b) if math.dist(p, q) < 1e-9]
+        assert len(shared) == 1                                                        # at exactly one corner
     xs = [x for n in BOARD_TURN for x, _ in board_corners(n)]
     ys = [y for n in BOARD_TURN for _, y in board_corners(n)]
     assert max(abs(x) for x in xs) <= TABLE_W / 2 and -min(ys) <= TABLE_ABOVE and max(ys) <= TABLE_BELOW
@@ -106,10 +109,12 @@ def test_focus_camera_fills_the_screen_with_the_board(screen, board):
     assert max(max(xs) - min(xs), max(ys) - min(ys)) >= min(size) * 0.9
 
 
-def test_focus_on_a_phone_is_at_least_twice_the_table():
+def test_focus_on_a_phone_about_doubles_the_table():
+    """The table is compact now (boards corner to corner), so it is already drawn big; zooming in
+    on one board still makes it about twice as big."""
     phone = SCREENS["phone"]
     for board in BOARD_TURN:
-        assert focus_camera(board, *phone).zoom >= 2 * table_camera(*phone).zoom
+        assert focus_camera(board, *phone).zoom >= 1.9 * table_camera(*phone).zoom
 
 
 def test_camera_dispatch():
@@ -128,10 +133,18 @@ def test_tall_phone_gets_a_side_area_above_a_full_width_square():
     assert side.y == 0 and side.h == 610 - 344 - SIDE_GAP and side.w == 344
 
 
-def test_wide_screen_gets_a_side_area_on_the_left():
-    main, side = regions(1360, 610)
-    assert (main.w, main.h) == (610, 610) and main.x + main.w == 1360
-    assert side.x == 0 and side.w == 1360 - 610 - SIDE_GAP
+def test_wide_screen_gives_the_whole_scene_to_the_table():
+    """No players list beside the table on a laptop or monitor: the table sits in the middle."""
+    for size in ((1360, 610), (1904, 940)):
+        main, side = regions(*size)
+        assert side is None and (main.x, main.y, main.w, main.h) == (0, 0, *size)
+        cam = table_camera(main.w, main.h)
+        assert cam.to_screen((0, (TABLE_BELOW - TABLE_ABOVE) / 2), main.w, main.h)[0] == pytest.approx(main.w / 2)
+
+
+def test_the_table_is_bigger_on_a_monitor_than_before():
+    """1920 x 1080 leaves a 1904 x 940 scene: boards used to be 329 px wide."""
+    assert table_camera(1904, 940).zoom > 345
 
 
 def test_no_side_area_when_there_is_no_room():
@@ -164,3 +177,25 @@ def test_name_labels_fit_on_the_table_and_stay_clear_of_the_boards():
         assert all(gap(rect, board_corners(n)) > 0 for n in BOARD_TURN)
         assert abs(x) + w / 2 <= TABLE_W / 2 and y + h / 2 <= TABLE_BELOW and y - h / 2 >= -TABLE_ABOVE
         assert y - h / 2 > PLAYER_SPOT[p][1] + TOKEN / 2                  # below the disc, not on it
+
+
+# ---------- turning the table (computer screens) ----------
+
+def test_turning_brings_each_player_to_the_bottom():
+    for p in PLAYERS:
+        x, y = rotate_point(PLAYER_SPOT[p], facing_turn(p))
+        assert x == pytest.approx(0, abs=1e-9) and y > 1
+        assert not name_below(p, facing_turn(p))                          # their name sits above the disc
+
+
+def test_turning_takes_the_short_way_round():
+    assert nearest_turn(180, 60) == 60 and nearest_turn(300, 60) == 420 and nearest_turn(-60, 180) == -180
+
+
+@pytest.mark.parametrize("player", PLAYERS)
+def test_a_turned_table_still_fits_the_screen_and_keeps_its_size(player):
+    size, turn = (1904, 940), facing_turn(player)
+    cam = table_camera(*size, turn)
+    points = [rotate_point(p, turn) for n in BOARD_TURN for p in board_corners(n)]
+    assert on_screen(cam, points, size)
+    assert cam.zoom == pytest.approx(table_camera(*size).zoom, rel=0.03)      # turning doesn't resize it

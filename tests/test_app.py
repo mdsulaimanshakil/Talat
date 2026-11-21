@@ -7,8 +7,9 @@ ft = pytest.importorskip("flet")
 import math  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
-from talat.app import GOLD, TalatApp, shape_points, tower_view  # noqa: E402
+from talat.app import FRAME_SHARE, GOLD, SCROLL_GUTTER, TalatApp, shape_points, tower_view  # noqa: E402
 from talat.scene import BOARD_TURN  # noqa: E402
+from talat.look import FRAMES, THEMES, TOWER_STYLES, Look, Settings  # noqa: E402
 from talat.engine import PLAYERS, Shape  # noqa: E402
 from tests.helpers import make_state, t  # noqa: E402
 
@@ -53,8 +54,8 @@ def degrees(box):
 
 
 def glowing(view):
-    """The boards of a table view that glow gold."""
-    return {n for n, box in view.boards.items() if box.shadow is not None and box.shadow.color != "#000000"}
+    """The boards of a table view that glow in the accent colour (the others cast a plain shadow)."""
+    return {n for n, box in view.boards.items() if box.shadow is not None and box.shadow.color == GOLD}
 
 
 def click(page, label):
@@ -100,7 +101,7 @@ def test_start_screen():
     assert "CSE" not in texts(page) and "LAB" not in texts(page).upper()   # no course text in the game
 
 
-@pytest.mark.parametrize("width, height", [(1300, 900), (412, 860)])     # laptop and phone
+@pytest.mark.parametrize("width, height", [(412, 860), (600, 860)])     # phones: the camera zooms in
 def test_human_turn_pair_then_focus_then_back(width, height):
     """Human's turn: their two boards come forward; they pick one, play on it, then the next turn."""
     page, app = human_game(width, height)
@@ -141,7 +142,8 @@ def test_camera_zooms_in_while_the_boards_keep_their_table_angles():
         for name, box in app.main.boards.items():      # the table never changes: same angles, all boards shown
             assert degrees(box) == pytest.approx(BOARD_TURN[name] % 360)
             assert box.opacity > 0
-    assert zoom["pair"] >= zoom["table"] and zoom["focus"] >= 2 * zoom["table"]
+    # The table itself is drawn big now (boards corner to corner), so zooming in roughly doubles it.
+    assert zoom["pair"] >= zoom["table"] and zoom["focus"] >= 1.9 * zoom["table"]
     # the focused board sits in the middle of the scene
     view, world = app.main_rect, app.main.world
     box, k = app.main.boards["A"], world.scale.scale
@@ -153,7 +155,7 @@ def test_camera_zooms_in_while_the_boards_keep_their_table_angles():
 
 
 def test_your_boards_glow_until_you_pick_one():
-    page, app = human_game()
+    page, app = human_game(412, 860)                   # phone: tap a glowing board to zoom in
     boards = app.main.boards
     assert glowing(app.main) == {"A", "C"}             # White's two boards
     assert boards["A"].on_click is not None and boards["B"].on_click is None
@@ -273,14 +275,25 @@ def test_watching_needs_no_mini_table():
     assert app.mini is None and app.panel is not None
 
 
-def test_boards_have_no_frame_so_the_squares_get_the_room():
+def test_boards_have_a_frame_around_their_squares():
     page, app = phone_game()
     for view in (app.main, app.mini):
         assert 5 * view.cell_px + 2 * view.edge == pytest.approx(view.board_px)
-        assert view.edge <= max(1.0, 0.01 * view.board_px)             # just a hairline outline
+        assert view.edge == pytest.approx(FRAME_SHARE * view.board_px)  # the frame band
+    sizes = set()
     for stage in (app.show_table, app.show_pair, lambda: app.focus_board("A")):
-        stage()                                                        # boards glow; the outline stays put
-        assert {box.border.top.width for box in app.main.boards.values()} == {app.main.edge}
+        stage()                                                        # boards glow; their size stays put
+        sizes |= {(box.width, box.height) for box in app.main.boards.values()}
+    assert sizes == {(app.main.board_px, app.main.board_px)}
+
+
+def test_without_a_frame_boards_get_a_hairline_outline():
+    page, app = phone_game()
+    app.change(frame="none")
+    for view in (app.main, app.mini):
+        assert 5 * view.cell_px + 2 * view.edge == pytest.approx(view.board_px)
+        assert view.edge <= max(1.0, 0.01 * view.board_px)
+        assert {box.border.top.width for box in view.boards.values()} == {view.edge}
 
 
 def test_pass_and_play_names_every_player():
@@ -321,16 +334,16 @@ def test_a_human_seat_gets_a_name_field():
 
 
 def test_names_in_the_status():
-    page, app = human_game(seats=("human", "human", "greedy"))
+    page, app = human_game(412, 860, seats=("human", "human", "greedy"))
     assert [app.display_name(p) for p in PLAYERS] == ["Player 1", "Player 2", "Easy AI"]
     assert "Player 1's turn" in texts(page)
-    page, app = human_game()
+    page, app = human_game(412, 860)
     assert "Your turn · choose a board" in texts(page)
     app.session.state = make_state({}, to_move=2)
     app.paused = True
     app.turn_view()
     app.render()
-    assert "Paused · Random (Black) is next" in texts(page)
+    assert "Paused · Random (Onyx) is next" in texts(page)           # the player's colour, by name
 
 
 @pytest.mark.parametrize("seats, names, winner, title", [
@@ -348,7 +361,7 @@ def test_the_result_names_the_winner(seats, names, winner, title):
 
 
 def test_the_tray_shows_your_towers_through_the_whole_setup_turn():
-    page, app = human_game()
+    page, app = human_game(412, 860)
     s = app.session
     tray = app.bottom.content.controls[-1]
     assert app.stage == "pair" and len(tray.controls) == 9 and tray.controls[0].on_click is not None
@@ -359,3 +372,167 @@ def test_the_tray_shows_your_towers_through_the_whole_setup_turn():
     tray = app.bottom.content.controls[-1]
     assert s.to_move == 2 and len(tray.controls) == 8  # still your towers, dimmed, while an AI places
     assert tray.opacity < 1 and tray.controls[0].on_click is None
+
+
+# ---------- the look: settings, desktop layout, towers ----------
+
+def test_wide_screens_have_no_players_list():
+    """On a laptop or monitor the table gets the whole scene, centred; scores are on the table."""
+    page, app = human_game(1920, 1080)
+    assert app.side_rect is None and app.panel is None and app.mini is None
+    assert (app.main_rect.x, app.main_rect.y) == (0, 0) and app.main_rect.w == app.scene_size[0]
+    assert "no captures yet" not in texts(page)
+    assert all(label.content.value for label in app.main.labels.values())   # names and scores on the table
+
+
+def test_desktop_home_shows_the_menu_beside_the_table():
+    page = FakePage(1920, 1080)
+    TalatApp(page)
+    canvases = [c for c in find(page, ft.Container) if c.content.__class__.__name__ == "Canvas"]
+    assert len(canvases) > 20                                   # the table's towers, drawn in the chosen look
+    assert "Solo" in texts(page) and "Appearance" in [b.content for b in find(page, ft.OutlinedButton)]
+
+
+def test_settings_change_the_look_everywhere_and_are_remembered():
+    page = FakePage(1920, 1080)
+    app = TalatApp(page)
+    app.open_settings()
+    assert app.screen == "settings"
+    for title in ("Settings", "THEME", "TOWER COLOURS", "TOWER SIZE BORDERS", "BOARD FRAME", "Jade Court"):
+        assert title in texts(page)
+    app.change(theme="jade", palette="cobalt", towers="rings")
+    assert page.bgcolor == THEMES["jade"].bg and app.look.colour_name(2) == "Cobalt"
+    app.close_settings()
+    assert app.screen == "start"
+    again = TalatApp(FakePage(1920, 1080))                        # next time the app opens
+    assert again.settings.theme == "jade" and again.look.style == "rings"
+    app.reset_settings()
+    assert app.settings.theme == "midnight" and TalatApp(FakePage()).settings.theme == "midnight"
+
+
+def test_settings_from_a_game_return_to_it_in_the_new_look():
+    page, app = human_game(1920, 1080)
+    s = app.session
+    app.open_settings()
+    app.change(frame="oxblood", palette="teal")
+    app.close_settings()
+    assert app.screen == "game" and app.session is s
+    assert app.main.look.frame == FRAMES["oxblood"][1] and app.look.colour_name(3) == "Teal"
+
+
+def test_the_game_waits_while_the_player_is_in_settings():
+    page, app = human_game()
+    app.session.state = make_state({}, to_move=2)              # an AI is to move
+    calls = []
+    page.run_thread = lambda handler, *args: calls.append(handler)
+    app.open_settings()
+    app.maybe_run_ai()
+    assert not calls
+    app.close_settings()
+    assert calls                                               # it carries on when they come back
+
+
+@pytest.mark.parametrize("style", list(TOWER_STYLES))
+def test_towers_show_their_size(style):
+    look = Look(Settings(towers=style))
+    drawn = {z: len(tower_view(t(f"1{z}H"), 60, look).shapes) for z in "SML"}
+    if style == "plain":
+        assert drawn["S"] == drawn["M"] == drawn["L"]           # size only
+    else:
+        assert drawn["S"] < drawn["M"] < drawn["L"]             # 1, 2, 3 outlines
+
+
+def test_move_hints_can_be_turned_off():
+    page, app = human_game()
+    app.change(hints=False)
+    app.focus_board("A")
+    s = app.session
+    square = next(sq for (board, sq) in s.targets() if board == "A")
+    cell, holder = app.main.cells[("A", square)]
+    assert holder.content is None and cell.on_click is not None    # no dot, but still a square you can tap
+
+
+# ---------- computer screens: the whole table, turned to the player ----------
+
+def turn_mod(angle):
+    return round(angle) % 360
+
+
+def test_desktop_players_play_on_the_whole_table_without_zooming():
+    page, app = human_game(1920, 1080)
+    s = app.session
+    assert app.stage == "table" and glowing(app.main) == {"A", "C"}          # White's boards glow
+    assert all(box.on_click is None for box in app.main.boards.values())       # nothing to zoom into
+    assert "Your turn · place a tower on your starting line" in texts(page)
+    app.focus_board("A")
+    assert app.stage == "table"                                                # still the whole table
+    board, square = next(iter(s.targets()))
+    cell, _ = app.main.cells[(board, square)]
+    assert app.main.cells[("B", (2, 2))][0].on_click is None                   # not one of yours
+    cell.on_click(None)                                                        # tap your starting line
+    assert len(s.log) == 3 and s.to_move == 1                                  # placed; both AIs answered
+
+    s.state = make_state({"A": {(1, 2): "1LH", (2, 3): "2MT", (4, 0): "2SQ"}, "C": {(4, 2): "1SQ"}})
+    app.turn_view()
+    app.render()
+    assert "Your turn · tap one of your towers" in texts(page)
+    app.main.cells[("A", (1, 2))][0].on_click(None)                            # select straight on the table
+    assert s.selected == ("A", (1, 2)) and "tap a highlighted square" in texts(page)
+
+
+def test_desktop_table_turns_so_the_player_to_move_sits_at_the_bottom():
+    page, app = human_game(1920, 1080, seats=("human", "human", "random"))
+    s, view = app.session, app.main
+    assert turn_mod(view.turn) == 180                     # White's seat comes to the bottom...
+    assert all(turn_mod(math.degrees(holder.rotate.angle)) == turn_mod(-BOARD_TURN[n] - 180)
+               for (n, _), (_, holder) in view.cells.items())                  # ...towers stay upright
+    assert all(turn_mod(math.degrees(box.rotate.angle)) == 180 for box in view.letters.values())
+    assert view.labels[1].top == 0 and view.labels[2].top > 0                  # bottom seat: name above
+    before = view.turn
+    board, square = next(iter(s.targets()))
+    app.human(lambda: s.tap(board, square))
+    assert s.to_move == 2 and turn_mod(view.turn) == 60                        # now Black's turn
+    assert abs(view.turn - before) == pytest.approx(120)                       # the short way round
+    assert app.main is view                                                    # turned, not redrawn
+
+
+def test_desktop_table_holds_still_while_the_ais_move():
+    page, app = human_game(1920, 1080)                    # Solo: you against two AIs
+    s = app.session
+    board, square = next(iter(s.targets()))
+    app.human(lambda: s.tap(board, square))
+    assert s.to_move == 1 and turn_mod(app.main.turn) == 180      # still facing you
+
+
+def test_watching_on_a_desktop_never_turns_the_table():
+    page = FakePage(1920, 1080)
+    app = TalatApp(page)
+    app.seats = {p: "random" for p in PLAYERS}
+    app.delay = 0
+    app.start()
+    assert app.session.is_over() and app.main.turn == 0
+
+
+@pytest.mark.parametrize("width, height", [(1280, 720), (1920, 1080), (1366, 640)])
+def test_desktop_home_fits_one_page_without_scrolling(width, height):
+    page = FakePage(width, height)
+    app = TalatApp(page)
+    assert not [c for c in find(page, ft.Column) if c.scroll]          # nothing scrolls
+    click(page, "With a friend")                                        # two humans: the players open...
+    assert app.customize and not [c for c in find(page, ft.Column) if c.scroll]
+    assert [f.hint_text for f in find(page, ft.TextField)] == ["Player 1", "Player 2"]   # ...beside the menu
+    assert "Players" in texts(page) and "Solo" in texts(page)
+    next(b for b in find(page, ft.TextButton) if b.content == "Done").on_click(None)
+    assert not app.customize
+
+
+@pytest.mark.parametrize("width, height", [(1280, 720), (1920, 1080), (412, 860)])
+def test_the_settings_scrollbar_has_its_own_lane(width, height):
+    """The scrolling list is wider than its tiles, so the scrollbar never covers them."""
+    page = FakePage(width, height)
+    app = TalatApp(page)
+    app.open_settings()
+    scrolling = [c for c in find(page, ft.Column) if c.scroll]
+    assert len(scrolling) == 1 and scrolling[0].width is not None
+    widest = max(c.width for c in all_controls(scrolling[0]) if isinstance(c, (ft.Row, ft.Container)) and c.width)
+    assert scrolling[0].width - widest >= SCROLL_GUTTER

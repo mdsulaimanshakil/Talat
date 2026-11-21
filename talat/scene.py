@@ -18,20 +18,24 @@ from dataclasses import dataclass
 
 from talat.engine import BOARD_PLAYERS
 
-BOARD_DISTANCE = 0.86                              # table centre -> board centre
+# The boards meet corner to corner, like the real board. Each board is turned to face its own
+# direction, so two neighbours' corners meet on the line halfway between them when the centre
+# distance is 0.5 + 0.5 / sqrt(3) board widths.
+BOARD_DISTANCE = 0.5 + 0.5 / math.sqrt(3)         # table centre -> board centre (0.789)
 BOARD_DIRECTION = {"A": -30, "B": 90, "C": 210}    # where each board sits (degrees, clockwise)
 BOARD_TURN = {"A": -30, "B": 90, "C": -150}        # rotation so starting lines face their players
-PLAYER_SPOT = {1: (0.0, -1.30), 2: (1.195, 0.69), 3: (-1.195, 0.69)}
-TABLE_W, TABLE_ABOVE, TABLE_BELOW = 2.90, 1.48, 1.38   # width; height above / below the centre
+_SEAT = 1.15 * math.cos(math.radians(30))         # Black and Grey sit 1.15 out, at 30 and 150 degrees
+PLAYER_SPOT = {1: (0.0, -1.18), 2: (_SEAT, 0.575), 3: (-_SEAT, 0.575)}
+TABLE_W, TABLE_ABOVE, TABLE_BELOW = 2.80, 1.36, 1.32   # width; height above / below the centre
 TOKEN = 0.30                                       # player disc diameter
-LETTER_DISTANCE = 0.18                             # board letters, out from the centre
+LETTER_DISTANCE = 0.15                             # board letters, in the gap where the corners meet
 NAME_GAP, NAME_W, NAME_H = 0.02, 0.50, 0.16        # a player's name, just under their disc
 
 MARGIN = 1.03            # breathing room around what the camera frames
 SIDE_GAP = 12.0          # between the main view and the side area, pixels
 SIDE_MIN = 120.0         # the smallest side area worth showing, pixels
-MAX_TABLE_ZOOM = 360.0   # pixels per board width: the table never gets bigger than this
-MAX_ZOOM = 620.0         # nor does a board when the camera zooms in
+MAX_TABLE_ZOOM = 380.0   # pixels per board width: the table never gets bigger than this
+MAX_ZOOM = 660.0         # nor does a board when the camera zooms in
 
 
 def board_centre(name: str) -> tuple[float, float]:
@@ -66,14 +70,13 @@ class Rect:
 
 
 def regions(width: float, height: float) -> tuple[Rect, Rect | None]:
-    """Split the scene into the main view, a square in which the table (or the board the camera
-    zooms into) is shown as large as it can be, and a side area for the players or a mini table:
-    above the main view on a tall screen, to its left on a wide one; none if there's no room.
-    (The table is about as tall as it is wide, so a square loses nothing.)"""
+    """Split the scene into the main view, where the table (or the board the camera zooms into)
+    is shown as large as it can be, and a side area for the players or a mini table.
+    A tall phone keeps a side area above a full-width square. A wide screen (laptop, monitor)
+    gives the whole scene to the table, centred, with no players list beside it: the scores sit
+    on the table and in the top bar."""
     if height - width - SIDE_GAP >= SIDE_MIN:
         return Rect(0, height - width, width, width), Rect(0, 0, width, height - width - SIDE_GAP)
-    if width - height - SIDE_GAP >= SIDE_MIN:
-        return Rect(width - height, 0, height, height), Rect(0, 0, width - height - SIDE_GAP, height)
     return Rect(0, 0, width, height), None
 
 
@@ -87,9 +90,55 @@ class Camera:
         return width / 2 + (point[0] - self.x) * self.zoom, height / 2 + (point[1] - self.y) * self.zoom
 
 
-def table_camera(width: float, height: float) -> Camera:
-    zoom = min(width / TABLE_W, height / (TABLE_ABOVE + TABLE_BELOW), MAX_TABLE_ZOOM)
-    return Camera(0.0, (TABLE_BELOW - TABLE_ABOVE) / 2, zoom)
+# ---------- turning the table (computer screens) ----------
+# On a computer screen the whole table turns so that the player whose turn it is sits at the
+# bottom, their two boards in front of them and the third board across the table. The towers,
+# letters, discs and names turn back so they stay upright.
+
+def rotate_point(point: tuple[float, float], degrees: float) -> tuple[float, float]:
+    t = math.radians(degrees)
+    x, y = point
+    return x * math.cos(t) - y * math.sin(t), x * math.sin(t) + y * math.cos(t)
+
+
+def facing_turn(player: int) -> float:
+    """How far to turn the table (degrees, clockwise) to bring `player`'s seat to the bottom."""
+    x, y = PLAYER_SPOT[player]
+    return (90 - math.degrees(math.atan2(y, x))) % 360
+
+
+def nearest_turn(current: float, target: float) -> float:
+    """`target` written as the angle closest to `current`, so the table turns the short way."""
+    return current + ((target - current + 180) % 360 - 180)
+
+
+def name_below(player: int, turn: float = 0.0) -> bool:
+    """A player's name goes under their disc, except for the seat at the bottom of the screen,
+    whose name goes above it (towards the table) so it doesn't stick out past the table."""
+    return rotate_point(PLAYER_SPOT[player], turn)[1] < 1.0
+
+
+def table_bounds(turn: float) -> tuple[float, float, float, float]:
+    """(left, right, top, bottom) of everything on the table once it is turned by `turn` degrees."""
+    points = [rotate_point(p, turn) for n in BOARD_TURN for p in board_corners(n)]
+    for player, spot in PLAYER_SPOT.items():
+        x, y = rotate_point(spot, turn)
+        r = TOKEN / 2
+        name = y + r + NAME_GAP + NAME_H if name_below(player, turn) else y - r - NAME_GAP - NAME_H
+        points += [(x - r, y - r), (x + r, y + r), (x - NAME_W / 2, name), (x + NAME_W / 2, name)]
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def table_camera(width: float, height: float, turn: float = 0.0) -> Camera:
+    """The whole table, as big as the screen allows. Turned tables are framed from their actual
+    outline (in turned coordinates), since a turned table is a slightly different shape."""
+    if not turn % 360:
+        zoom = min(width / TABLE_W, height / (TABLE_ABOVE + TABLE_BELOW), MAX_TABLE_ZOOM)
+        return Camera(0.0, (TABLE_BELOW - TABLE_ABOVE) / 2, zoom)
+    left, right, top, bottom = table_bounds(turn)
+    zoom = min(width / ((right - left) * MARGIN), height / ((bottom - top) * MARGIN), MAX_TABLE_ZOOM)
+    return Camera((left + right) / 2, (top + bottom) / 2, zoom)
 
 
 def _frame(points, width: float, height: float, at_least: float) -> Camera:

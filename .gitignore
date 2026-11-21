@@ -1,5 +1,6 @@
 # Python
 .venv/
+.venv-*/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -11,6 +12,14 @@ storage/
 
 # Tournament results
 results/
+
+# Planning notes, reports, slides and reference files: kept locally, not in the repo
+BUILD_PLAN.md
+requirements.txt
+images.jpeg
+*.docx
+*.pptx
+*.pdf
 
 # macOS – not needed on Windows, safe to ignore
 .DS_Store

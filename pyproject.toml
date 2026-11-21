@@ -22,7 +22,7 @@ path = "."
 exclude = [
     "tests", "results", "BUILD_PLAN.md", "README.md", "requirements.txt",
     "talat-rules-4.pdf", "images.jpeg", "TALAT_Presentation_11_16_22.pptx",
-    "TALAT_Presentation_11_16_22 copy.pptx",
+    "TALAT_Presentation_11_16_22 copy.pptx", "Talat_Final_Report.docx",
 ]
 
 [tool.flet.android]

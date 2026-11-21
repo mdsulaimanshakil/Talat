@@ -4,7 +4,6 @@ A three-player, three-board AI strategy game, based on the board game *Talat* by
 CSE 3210 Artificial Intelligence Lab final project, KUET.
 
 Three AI agents play it: Greedy Best-First Search, Max^n / Paranoid alpha-beta, and Monte Carlo Tree Search (UCB1).
-The rules and the build steps are in [BUILD_PLAN.md](BUILD_PLAN.md).
 
 ## Setup
 
@@ -13,7 +12,7 @@ Requires Python 3.11+.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install flet==1.0.5 pytest
 ```
 
 ## Run
